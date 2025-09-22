@@ -1,7 +1,7 @@
 ![alt text](https://i.imgur.com/IzeMm1h.png)
 
 # Uasset-Model-Fixer
-A lightweight tool for repairing broken Unreal Engine `.uasset` models and packing/unpacking `.pak` files with drag-and-drop simplicity.
+A lightweight tool for repairing broken Unreal Engine models `.uasset`/`.uexp` for GTA Trilogy DE and packing/unpacking `.pak` files with drag-and-drop simplicity.
 
 # **Key features include:**
 
@@ -27,6 +27,7 @@ Designed to assist both modders and developers, **Model Fixer** saves time and e
 This project would not be possible without the amazing work of others:  
 
 - **[Hypermodule’s AIBRemover](https://github.com/hypermodule/AIBRemover)** – Provides the core functionality for repairing Unreal Engine `.uasset` files.  
-- **[CUE4Parse](https://github.com/FabianFG/CUE4Parse)** – The powerful Unreal Engine asset parser that AIBRemover is built upon.  
+- **[CUE4Parse](https://github.com/FabianFG/CUE4Parse)** – The powerful Unreal Engine asset parser that AIBRemover is built upon.
+- **[UnrealPak](https://github.com/xamarth/unrealpak)** – Used for packing and unpacking .pak files.  
 
 Special thanks to their developers for making these tools available to the community 👏
