@@ -13,6 +13,11 @@ A lightweight tool for repairing broken Unreal Engine models `.uasset`/`.uexp` f
   - Drag a **folder** → creates an uncompressed `.pak` file in the same folder.  
   - Drag a **.pak file** → unpacks its contents to the **Desktop**.  
   - Files are automatically organized based on what you dragged.
+ 
+- **Color Management (Tools):**  
+  - Color pick values from any image you choose.  
+  - Get RGB values of any color. 
+  - RGB/HEX to decimal convertor (helps editing colors of materials).
 
 - **Automatic Setup:** Downloads required resources on first launch, ensuring everything works out of the box.  
 
