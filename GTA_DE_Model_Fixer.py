@@ -1,6 +1,6 @@
 import tkinter as tk
 import tkinter.font as tkFont
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, colorchooser
 from tkinterdnd2 import DND_FILES, TkinterDnD
 import os
 import subprocess
@@ -18,6 +18,7 @@ import shutil
 import threading
 import ctypes
 from ctypes import windll
+import pyperclip
 
 def get_script_directory():
     if getattr(sys, 'frozen', False):
@@ -72,30 +73,30 @@ def ensure_files_folder():
     download_and_extract_files()  # blocking, console download
 
 def run_fix_model():
-    # Open file dialog to select a .uasset file
-    file_path = filedialog.askopenfilename(
-        title="Select a UAsset file",
+    file_paths = filedialog.askopenfilenames(
+        title="Select UAsset files",
         filetypes=[("UAsset Files", "*.uasset")]
     )
 
-    if not file_path:
-        return  # user cancelled
+    if not file_paths:
+        return
 
-    # Build path to the MeshAibRemover.exe in the Files folder
     exe_path = os.path.join(get_script_directory(), "Files", "MeshAibRemover.exe")
     if not os.path.exists(exe_path):
         messagebox.showerror("Error", f"MeshAibRemover.exe not found:\n{exe_path}")
         return
 
-    try:
-        # Run the MeshAibRemover.exe in its own console
-        subprocess.run([exe_path, file_path])
+    def run_file(file_path):
+        try:
+            subprocess.run([exe_path, file_path], check=True)
+            print(f"✅ Fixed {file_path}")
+        except Exception as e:
+            print(f"❌ Failed {file_path} ({e})")
 
-        # Show success message after it finishes
-        messagebox.showinfo("Success", f"File processed successfully:\n{file_path}")
+    for file_path in file_paths:
+        threading.Thread(target=run_file, args=(file_path,), daemon=True).start()
 
-    except Exception as e:
-        messagebox.showerror("Error", f"An exception occurred:\n{e}")
+    messagebox.showinfo("Model Fixer", f"Started processing {len(file_paths)} file(s). Check console for details.")
 
 def create_desktop_shortcut(shortcut_name="Model Fixer"):
     """
@@ -194,6 +195,9 @@ def show_credits():
     credits_win.configure(bg="#2b2b2b")
     credits_win.resizable(False, False)
 
+    # Set the app icon for this Toplevel window
+    credits_win.iconbitmap(os.path.join(get_script_directory(), "Files", ".Resources", "ICON.ico"))
+
     # Center the window
     credits_win.update_idletasks()
     w = 550
@@ -244,6 +248,9 @@ def show_info():
     info_win.geometry("550x300")
     info_win.configure(bg="#2b2b2b")
     info_win.resizable(False, False)
+
+    # Set the app icon for this Toplevel window
+    info_win.iconbitmap(os.path.join(get_script_directory(), "Files", ".Resources", "ICON.ico"))
 
     # Center the window
     info_win.update_idletasks()
@@ -343,6 +350,526 @@ def on_closing():
 # Call this immediately after defining get_script_directory()
 ensure_files_folder()
 
+def open_image_picker_window(parent=None):
+    def open_image():
+        nonlocal photo, original_image, img_offset_x, img_offset_y, scale_ratio
+
+        # Temporarily turn off topmost so file dialog isn't hidden
+        picker_window.attributes("-topmost", False)
+        picker_window.update()
+
+        file_path = filedialog.askopenfilename(
+            filetypes=[("Image files", "*.jpg *.jpeg *.png *.bmp *.gif")]
+        )
+        if file_path:
+            original_image = Image.open(file_path)
+
+            # Scale image to fit canvas
+            width, height = original_image.size
+            scale_ratio = min(canvas_width / width, canvas_height / height, 1)  # never upscale
+            new_width = int(width * scale_ratio)
+            new_height = int(height * scale_ratio)
+            resized_image = original_image.resize((new_width, new_height), Image.LANCZOS)
+
+            photo = ImageTk.PhotoImage(resized_image)
+
+            # Center image inside the canvas
+            img_offset_x = (canvas_width - new_width) // 2
+            img_offset_y = (canvas_height - new_height) // 2
+
+            display_image(photo, img_offset_x, img_offset_y)
+
+            # turn on topmost so file dialog isn't hidden
+            picker_window.attributes("-topmost", True)
+            picker_window.update()
+
+    def display_image(img, x, y):
+        canvas.delete("all")
+        canvas.config(width=canvas_width, height=canvas_height)
+        canvas.create_image(x, y, anchor=tk.NW, image=img)
+        canvas.image = img
+
+    def get_pixel_color(event):
+        if hasattr(canvas, 'image') and original_image is not None:
+            img_x = event.x - img_offset_x
+            img_y = event.y - img_offset_y
+            if 0 <= img_x < (original_image.width * scale_ratio) and 0 <= img_y < (original_image.height * scale_ratio):
+                orig_x = int(img_x / scale_ratio)
+                orig_y = int(img_y / scale_ratio)
+                pixel_color_rgb = original_image.getpixel((orig_x, orig_y))
+                pixel_color_hex = f"#{pixel_color_rgb[0]:02x}{pixel_color_rgb[1]:02x}{pixel_color_rgb[2]:02x}"
+                rgb_label.config(text=f"RGBA: {pixel_color_rgb}")
+                hex_label.config(text=f"HEX: {pixel_color_hex}")
+
+    def copy_color_hex():
+        hex_value = hex_label.cget("text").split(": ")[1]
+        pyperclip.copy(hex_value)
+
+    # New window
+    picker_window = tk.Toplevel(parent)
+    picker_window.title("Image Color Picker")
+    picker_window.configure(bg="#2b2b2b")  # dark background
+    picker_window.attributes("-topmost", True)
+    window_width, window_height = 650, 700
+    picker_window.geometry(f"{window_width}x{window_height}")
+    picker_window.resizable(False, False)
+
+    # Set the app icon for this Toplevel window
+    picker_window.iconbitmap(os.path.join(get_script_directory(), "Files", ".Resources", "ICON.ico"))
+
+    # Center the window
+    screen_width = picker_window.winfo_screenwidth()
+    screen_height = picker_window.winfo_screenheight()
+    position_x = (screen_width - window_width) // 2
+    position_y = (screen_height - window_height) // 2
+    picker_window.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
+
+    # Fixed canvas size
+    canvas_width, canvas_height = 600, 500
+    canvas = tk.Canvas(picker_window, width=canvas_width, height=canvas_height, bg="#1f1f1f", cursor="pencil")
+    canvas.pack(pady=10)
+
+    # Info labels
+    rgb_label = tk.Label(picker_window, text="RGBA: ", font=("Segoe UI", 10), fg="white", bg="#2b2b2b")
+    rgb_label.pack(pady=2)
+    hex_label = tk.Label(picker_window, text="HEX: ", font=("Segoe UI", 10), fg="white", bg="#2b2b2b")
+    hex_label.pack(pady=2)
+
+    # Buttons
+    button_frame = ttk.Frame(picker_window)
+    button_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=5)
+
+    open_button = ttk.Button(button_frame, text="Open Image", command=open_image, cursor="hand2")
+    open_button.pack(side=tk.LEFT, padx=5, pady=5)
+
+    copy_button = ttk.Button(button_frame, text="Copy Color #", command=copy_color_hex, cursor="hand2")
+    copy_button.pack(side=tk.LEFT, padx=5, pady=5)
+
+    # Variables
+    photo = None
+    original_image = None
+    scale_ratio = 1.0
+    img_offset_x = 0
+    img_offset_y = 0
+
+    # Bind mouse click
+    canvas.bind("<Button-1>", get_pixel_color)
+
+    picker_window.wait_window()
+
+def show_links():
+    links = [
+        ("Tutorials Index", "https://gtaforums.com/topic/982746-gta-definitive-trilogy-tutorials-index/"),
+        ("LC.net Tutorial", "https://libertycity.net/gta-the-trilogy/articles/5194-how-to-create-mods-for-gta-the-trilogy.html"),
+        ("Modding the NSwitch Version", "https://www.reddit.com/r/GTATrilogyMods/comments/qwzkcc/modding_for_the_nintendo_switch_version/"),
+        ("Texture Modding Guide", "https://gtaforums.com/topic/977439-gtasade-texture-modding-guide/"),
+        ("Sound Modding Guide", "https://gtaforums.com/topic/910487-gta-sa-guide-for-making-car-sound-mods/"),
+        ("Localization Modding Guide", "https://gtaforums.com/topic/977646-gtasade-localization-modding-guide/"),
+        ("Vehicle Modding Guide", "https://video.wixstatic.com/video/4db758_7b8a302870994003b449e45b1de60f06/1080p/mp4/file.mp4")
+    ]
+
+    links_window = tk.Toplevel(root)
+    links_window.title("Helpful Links")
+    links_window.resizable(False, False)
+    links_window.configure(bg="#2b2b2b")
+    links_window.wm_attributes("-topmost", 1)
+
+    # Set the app icon for this Toplevel window
+    links_window.iconbitmap(os.path.join(get_script_directory(), "Files", ".Resources", "ICON.ico"))
+
+    # Fixed size & center
+    window_width, window_height = 650, 320
+    screen_width = links_window.winfo_screenwidth()
+    screen_height = links_window.winfo_screenheight()
+    position_x = (screen_width - window_width) // 2
+    position_y = (screen_height - window_height) // 2
+    links_window.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
+
+    # Title label
+    title_label = tk.Label(
+        links_window,
+        text="Helpful GTA DE Modding Links",
+        font=("Segoe UI", 14, "bold"),
+        bg="#2b2b2b",
+        fg="white"
+    )
+    title_label.pack(pady=(10, 5))
+
+    # Frame for text + scrollbar
+    frame = tk.Frame(links_window, bg="#2b2b2b")
+    frame.pack(expand=1, fill="both", padx=10, pady=(0,10))
+
+    # Text widget
+    text_widget = tk.Text(
+        frame,
+        wrap="word",
+        bg="#2b2b2b",
+        fg="white",
+        font=("Segoe UI", 10),
+        borderwidth=0,
+        highlightthickness=0
+    )
+    text_widget.pack(side="left", expand=1, fill="both")
+
+    # Scrollbar
+    scrollbar = ttk.Scrollbar(frame, command=text_widget.yview)
+    scrollbar.pack(side="right", fill="y")
+    text_widget.config(yscrollcommand=scrollbar.set)
+
+    text_widget.insert(tk.END, "Helpful Links:\n\n")
+
+    for description, url in links:
+        text_widget.insert(tk.END, f"{description}\n", "desc")
+        start = text_widget.index(tk.INSERT)
+        text_widget.insert(tk.END, f"{url}\n\n", "link")
+        end = text_widget.index(tk.INSERT)
+        text_widget.tag_add("link", start, end)
+
+    # Styling
+    text_widget.tag_configure("link", foreground="#4a90e2", underline=True)
+    text_widget.tag_configure("desc", foreground="white", font=("Segoe UI", 10, "bold"))
+
+    # Link behavior
+    def open_url(event):
+        start, end = text_widget.tag_prevrange("link", text_widget.index(tk.CURRENT))
+        url = text_widget.get(start, end)
+        webbrowser.open_new(url)
+
+    text_widget.tag_bind("link", "<Button-1>", open_url)
+    text_widget.tag_bind("link", "<Enter>", lambda e: text_widget.config(cursor="hand2"))
+    text_widget.tag_bind("link", "<Leave>", lambda e: text_widget.config(cursor=""))
+
+    text_widget.config(state=tk.DISABLED)
+
+def update_color():
+    r = red_scale.get()
+    g = green_scale.get()
+    b = blue_scale.get()
+    hex_color = f'#{r:02x}{g:02x}{b:02x}'.upper()
+    # Update color display (tk.Label)
+    color_display.config(bg=hex_color)
+    color_code.set(f'RGB({r}, {g}, {b}) / {hex_color}')
+    hex_entry_var.set(hex_color)
+
+def choose_color():
+    global color_display, red_scale, green_scale, blue_scale, color_code, color_picker_window
+    
+    # Hide color_picker_window
+    color_picker_window.withdraw()
+    
+    # Open color chooser dialog
+    chosen_color = colorchooser.askcolor(title="Choose color", initialcolor="#000000")
+    
+    if chosen_color[1] is not None:  # Check if a color was actually chosen
+        rgb_values = chosen_color[0]  # RGB values are in chosen_color[0]
+        red_scale.set(int(rgb_values[0]))
+        green_scale.set(int(rgb_values[1]))
+        blue_scale.set(int(rgb_values[2]))
+        update_color()
+        
+    # Bring the color picker window back
+    color_picker_window.deiconify()
+    color_picker_window.lift()
+    color_picker_window.focus_force()
+
+def copy_color_decimal():
+    # Get the current hex color code from color_code
+    hex_code = color_code.get().split(' / ')[-1]
+    
+    # Copy the hex code to clipboard
+    color_picker_window.clipboard_clear()
+    color_picker_window.clipboard_append(hex_code)
+    color_picker_window.update()  # Manually update clipboard
+
+def update_from_hex(event=None):
+    hex_color = hex_entry_var.get()
+    if len(hex_color) == 7 and hex_color[0] == '#':
+        try:
+            r = int(hex_color[1:3], 16)
+            g = int(hex_color[3:5], 16)
+            b = int(hex_color[5:7], 16)
+            red_scale.set(r)
+            green_scale.set(g)
+            blue_scale.set(b)
+            update_color()
+        except ValueError:
+            pass
+
+def open_color_picker_window(parent=None):
+    global color_display, red_scale, green_scale, blue_scale, color_code, color_picker_window, hex_entry_var
+
+    color_picker_window = tk.Toplevel(parent)
+    color_picker_window.title("Color Codes")
+    window_width = 320
+    window_height = 280
+    color_picker_window.geometry(f"{window_width}x{window_height}")
+    color_picker_window.resizable(False, False)
+    color_picker_window.configure(bg="#2b2b2b")
+    color_picker_window.attributes('-topmost', True)
+
+    # Set the app icon for this Toplevel window
+    color_picker_window.iconbitmap(os.path.join(get_script_directory(), "Files", ".Resources", "ICON.ico"))
+
+    # Center the window on the screen
+    screen_width = color_picker_window.winfo_screenwidth()
+    screen_height = color_picker_window.winfo_screenheight()
+    position_x = (screen_width - window_width) // 2
+    position_y = (screen_height - window_height) // 2
+    color_picker_window.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
+
+    # Color display
+    color_display = tk.Label(
+        color_picker_window,
+        text="Color Display",
+        width=20,
+        height=5,
+        bg="#1f1f1f",
+        fg="white",
+        relief="sunken",
+        bd=2
+        )
+    color_display.grid(row=0, column=0, columnspan=3, pady=10)
+
+    # RGB sliders
+    slider_bg = "#2b2b2b"
+    slider_fg = "#ff5fc0"
+    red_scale = tk.Scale(color_picker_window, from_=0, to=255, orient=tk.HORIZONTAL, label="Red",
+                         command=lambda x: update_color(), bg=slider_bg, fg=slider_fg, highlightbackground=slider_bg)
+    red_scale.grid(row=1, column=0)
+    green_scale = tk.Scale(color_picker_window, from_=0, to=255, orient=tk.HORIZONTAL, label="Green",
+                           command=lambda x: update_color(), bg=slider_bg, fg=slider_fg, highlightbackground=slider_bg)
+    green_scale.grid(row=1, column=1)
+    blue_scale = tk.Scale(color_picker_window, from_=0, to=255, orient=tk.HORIZONTAL, label="Blue",
+                          command=lambda x: update_color(), bg=slider_bg, fg=slider_fg, highlightbackground=slider_bg)
+    blue_scale.grid(row=1, column=2)
+
+    # Current color code display
+    color_code = tk.StringVar()
+    color_code.set("RGB(0, 0, 0) / #000000")
+    color_code_label = tk.Label(
+        color_picker_window,
+        textvariable=color_code,
+        bg="#2b2b2b",
+        fg="white"
+    )
+    color_code_label.grid(row=2, column=0, columnspan=3, pady=5)
+
+    # HEX entry
+    hex_entry_var = tk.StringVar()
+    hex_entry_var.set("")
+    hex_entry = ttk.Entry(color_picker_window, textvariable=hex_entry_var, width=12)
+    hex_entry.grid(row=3, column=0, columnspan=3, pady=5)
+    hex_entry.bind("<Return>", update_from_hex)
+
+    # Buttons frame
+    button_frame = tk.Frame(color_picker_window, bg="#2b2b2b")
+    button_frame.grid(row=4, column=0, columnspan=3, pady=10)
+
+    # Choose color button
+    choose_color_button = tk.Button(
+        color_picker_window,
+        text="Choose Color",
+        command=choose_color,
+        bg="#ff5fc0",
+        fg="white",
+        activebackground="#ff79d1",
+        cursor="hand2"
+    )
+    choose_color_button.grid(row=4, column=0, pady=10, padx=5)
+
+    # Spacer in column 1 (optional)
+    spacer = tk.Label(color_picker_window, width=5, bg="#2b2b2b")
+    spacer.grid(row=4, column=1)
+
+    # Copy color decimal button
+    copy_color_button = tk.Button(
+        color_picker_window,
+        text="Copy Color #",
+        command=copy_color_decimal,
+        bg="#ff5fc0",
+        fg="white",
+        activebackground="#ff79d1",
+        cursor="hand2"
+    )
+    copy_color_button.grid(row=4, column=2, pady=10, padx=5)
+
+def open_color_picker_window(parent=None):
+    global color_display, red_scale, green_scale, blue_scale, color_code, color_picker_window, hex_entry_var
+
+    # Create the window
+    color_picker_window = tk.Toplevel(parent)
+    color_picker_window.title("Color Codes")
+    color_picker_window.configure(bg="#2b2b2b")  # Dark background
+    color_picker_window.attributes('-topmost', True)
+    window_width, window_height = 320, 280
+    color_picker_window.geometry(f"{window_width}x{window_height}")
+    color_picker_window.resizable(False, False)
+
+    # Set the app icon for this Toplevel window
+    color_picker_window.iconbitmap(os.path.join(get_script_directory(), "Files", ".Resources", "ICON.ico"))
+
+    # Center the window
+    screen_width = color_picker_window.winfo_screenwidth()
+    screen_height = color_picker_window.winfo_screenheight()
+    position_x = (screen_width - window_width) // 2
+    position_y = (screen_height - window_height) // 2
+    color_picker_window.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
+
+    # Color display
+    color_display = tk.Label(
+        color_picker_window,
+        text="Color Display",
+        width=20,
+        height=5,
+        bg="#1f1f1f",
+        fg="white",
+        relief="sunken",
+        bd=2
+    )
+    color_display.grid(row=0, column=0, columnspan=3, pady=10)
+
+    # RGB sliders
+    slider_bg = "#2b2b2b"
+    slider_fg = "#ff5fc0"
+    red_scale = tk.Scale(color_picker_window, from_=0, to=255, orient=tk.HORIZONTAL, label="Red",
+                         command=lambda x: update_color(), bg=slider_bg, fg=slider_fg, highlightbackground=slider_bg)
+    red_scale.grid(row=1, column=0)
+    green_scale = tk.Scale(color_picker_window, from_=0, to=255, orient=tk.HORIZONTAL, label="Green",
+                           command=lambda x: update_color(), bg=slider_bg, fg=slider_fg, highlightbackground=slider_bg)
+    green_scale.grid(row=1, column=1)
+    blue_scale = tk.Scale(color_picker_window, from_=0, to=255, orient=tk.HORIZONTAL, label="Blue",
+                          command=lambda x: update_color(), bg=slider_bg, fg=slider_fg, highlightbackground=slider_bg)
+    blue_scale.grid(row=1, column=2)
+
+    # Current color code display
+    color_code = tk.StringVar()
+    color_code.set("RGB(0, 0, 0) / #000000")
+    color_code_label = tk.Label(
+        color_picker_window,
+        textvariable=color_code,
+        bg="#2b2b2b",
+        fg="white"
+    )
+    color_code_label.grid(row=2, column=0, columnspan=3, pady=5)
+
+    # HEX entry
+    hex_entry_var = tk.StringVar()
+    hex_entry_var.set("")
+    hex_entry = ttk.Entry(color_picker_window, textvariable=hex_entry_var, width=12)
+    hex_entry.grid(row=3, column=0, columnspan=3, pady=5)
+    hex_entry.bind("<Return>", update_from_hex)
+
+    # Buttons
+    choose_color_button = tk.Button(
+        color_picker_window,
+        text="Choose Color",
+        command=choose_color,
+        bg="#ff5fc0",
+        fg="white",
+        activebackground="#ff79d1",
+        cursor="hand2"
+    )
+    choose_color_button.grid(row=4, column=0, pady=10, padx=5)
+
+    # Spacer
+    spacer = tk.Label(color_picker_window, width=5, bg="#2b2b2b")
+    spacer.grid(row=4, column=1)
+
+    copy_color_button = tk.Button(
+        color_picker_window,
+        text="Copy Color #",
+        command=copy_color_decimal,
+        bg="#ff5fc0",
+        fg="white",
+        activebackground="#ff79d1",
+        cursor="hand2"
+    )
+    copy_color_button.grid(row=4, column=2, pady=10, padx=5)
+
+def rgb_hex_to_float(color):
+    if color.startswith('#'):
+        color = color[1:]  # Remove the '#' if present
+    
+    if len(color) == 6:
+        r = round(int(color[0:2], 16) / 255.0, 3)
+        g = round(int(color[2:4], 16) / 255.0, 3)
+        b = round(int(color[4:6], 16) / 255.0, 3)
+        return (r, g, b, 1.0)  # Alpha is 1.0 for fully opaque
+    elif len(color) == 3:
+        r = round(int(color[0], 16) / 15.0, 3)
+        g = round(int(color[1], 16) / 15.0, 3)
+        b = round(int(color[2], 16) / 15.0, 3)
+        return (r, g, b, 1.0)
+    elif ',' in color:
+        r, g, b = map(float, color.split(','))
+        r = round(r / 255.0, 3)
+        g = round(g / 255.0, 3)
+        b = round(b / 255.0, 3)
+        return (r, g, b, 1.0)  # Alpha is 1.0 for fully opaque
+    else:
+        raise ValueError("Invalid input format")
+
+def open_converter(parent=None):
+    def convert_color():
+        input_color = entry.get().strip()
+        try:
+            result = rgb_hex_to_float(input_color)
+            result_label.config(text=f"Converted result: {result}")
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
+
+    def copy_to_clipboard():
+        result = result_label.cget("text")
+        if result.startswith("Converted result: "):
+            result = result[len("Converted result: "):]
+            result = result.strip("()")
+            converter_window.clipboard_clear()
+            converter_window.clipboard_append(result)
+
+    # Create the converter window
+    converter_window = tk.Toplevel(parent)
+    converter_window.title("Converter")
+    converter_window.resizable(False, False)
+    converter_window.configure(bg="#2b2b2b")  # Dark theme
+    converter_window.attributes("-topmost", True)
+    window_width, window_height = 320, 180
+
+    # Set the app icon for this Toplevel window
+    converter_window.iconbitmap(os.path.join(get_script_directory(), "Files", ".Resources", "ICON.ico"))
+
+    # Center the window
+    screen_width = converter_window.winfo_screenwidth()
+    screen_height = converter_window.winfo_screenheight()
+    position_x = (screen_width - window_width) // 2
+    position_y = (screen_height - window_height) // 2
+    converter_window.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
+
+    # Label
+    label = tk.Label(converter_window, text="Enter RGB(0, 0, 0) / HEX(#000000) value:",
+                     bg="#2b2b2b", fg="white")
+    label.pack(pady=10)
+
+    # Entry
+    entry = ttk.Entry(converter_window, width=30)
+    entry.pack()
+
+    # Result frame
+    result_frame = tk.Frame(converter_window, bg="#2b2b2b")
+    result_frame.pack(pady=10)
+
+    result_label = tk.Label(result_frame, text="Converted result will appear here",
+                            bg="#2b2b2b", fg="white")
+    result_label.pack(side=tk.LEFT)
+
+    copy_button = tk.Button(result_frame, text="Copy", command=copy_to_clipboard,
+                            bg="#ff5fc0", fg="white", activebackground="#ff79d1", cursor="hand2")
+    copy_button.pack(side=tk.LEFT, padx=5)
+
+    # Convert button
+    convert_button = tk.Button(converter_window, text="Convert", command=convert_color,
+                               bg="#ff5fc0", fg="white", activebackground="#ff79d1", cursor="hand2")
+    convert_button.pack(pady=10)
+
 # --- UI setup ---
 root = TkinterDnD.Tk() 
 root.title("Model Fixer by ITSM0VER")
@@ -403,9 +930,20 @@ file_menu.add_command(label="Create Desktop Shortcut", command=lambda: create_de
 file_menu.add_command(label="Exit", command=on_closing)  # You can add more later
 menubar.add_cascade(label="File", menu=file_menu)
 
+# Tools menu
+tools_menu = tk.Menu(menubar, tearoff=0)
+tools_menu.add_command(label="Image Color Picker", command=open_image_picker_window)
+tools_menu.add_command(label="RGB Color Codes", command=open_color_picker_window)
+tools_menu.add_command(label="RGB&HEX to float32 Converter", command=open_converter)
+menubar.add_cascade(label="Tools", menu=tools_menu)
+root.config(menu=menubar)
+
 # Help menu
 help_menu = tk.Menu(menubar, tearoff=0)
 help_menu.add_command(label="Info", command=show_info)
+help_menu.add_separator()
+help_menu.add_command(label="Tutorial Links", command=show_links)
+help_menu.add_separator()
 help_menu.add_command(label="Credits", command=show_credits)
 help_menu.add_command(label=".NET 8.0 Download", command=open_dotnet_download)
 help_menu.add_command(label="About", command=lambda: messagebox.showinfo("About", "Model Fixer v1.0\nby ITSM0VER"))
