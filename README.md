@@ -5,12 +5,14 @@ A lightweight tool for repairing broken Unreal Engine models `.uasset`/`.uexp` f
 
 # **Key features include:**
 
-- **Model Repair:** Fixes `.uasset` files with serialization errors using [Hypermodule’s MeshAibRemover](https://github.com/hypermodule/MeshAibRemover), which itself is powered by [CUE4Parse](https://github.com/FabianFG/CUE4Parse).
+- **Model Repair:**  
+  - Fixes `.uasset` files with serialization errors using [Hypermodule’s MeshAibRemover](https://github.com/hypermodule/MeshAibRemover), powered by [CUE4Parse](https://github.com/FabianFG/CUE4Parse).  
+  - **New:** Supports fixing multiple models at once for faster workflows.
 
 - **PAK Management:**  
-  - Drag a **folder** to create an uncompressed `.pak` file.  
-  - Drag a **.pak file** to unpack its contents instantly.
-  - Files go to the **Desktop**. 
+  - Drag a **folder** → creates an uncompressed `.pak` file in the same folder.  
+  - Drag a **.pak file** → unpacks its contents to the **Desktop**.  
+  - Files are automatically organized based on what you dragged.
 
 - **Automatic Setup:** Downloads required resources on first launch, ensuring everything works out of the box.  
 
@@ -18,7 +20,9 @@ A lightweight tool for repairing broken Unreal Engine models `.uasset`/`.uexp` f
 
 - **Persistent Window Position:** Remembers the last screen and position the app was opened in for consistent workflow.  
 
-- **Integrated Shortcuts:** Quickly create a desktop shortcut for faster access.  
+- **Integrated Shortcuts:** Quickly create a desktop shortcut for faster access.
+
+- **Integrated Tools & Tutorials:** Access helpful links and tutorials directly from the **Tools** and **Help** menus in the top bar.  
 
 Designed to assist both modders and developers, **Model Fixer** saves time and effort when working with Unreal Engine models and archives, making asset repair and packaging a seamless process.
 
