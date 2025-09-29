@@ -1,12 +1,12 @@
 import tkinter as tk
 import tkinter.font as tkFont
-from tkinter import ttk, messagebox, filedialog, colorchooser
+from tkinter import ttk, messagebox, filedialog, colorchooser, Toplevel, Label
 from tkinterdnd2 import DND_FILES, TkinterDnD
 import os
 import subprocess
 import sys
 import webbrowser
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageFont
 import ctypes
 import ctypes.wintypes
 from win32com.client import Dispatch
@@ -19,6 +19,7 @@ import threading
 import ctypes
 from ctypes import windll
 import pyperclip
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def get_script_directory():
     if getattr(sys, 'frozen', False):
@@ -93,10 +94,19 @@ def run_fix_model():
         except Exception as e:
             print(f"❌ Failed {file_path} ({e})")
 
-    for file_path in file_paths:
-        threading.Thread(target=run_file, args=(file_path,), daemon=True).start()
+    # Run files in background threads
+    def background_task():
+        max_workers = 5
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(run_file, fp) for fp in file_paths]
+            # Wait for all futures to complete
+            for future in as_completed(futures):
+                pass
 
-    messagebox.showinfo("Model Fixer", f"Started processing {len(file_paths)} file(s). Check console for details.")
+        # Notify user when done
+        messagebox.showinfo("Model Fixer", f"Finished processing {len(file_paths)} file(s). Check console for details.")
+
+    threading.Thread(target=background_task, daemon=True).start()
 
 def create_desktop_shortcut(shortcut_name="Model Fixer"):
     """
@@ -341,20 +351,19 @@ def show_info():
     unrealpak_label.bind("<Button-1>", lambda e: webbrowser.open("https://github.com/xamarth/unrealpak"))
 
 def open_link():
-    webbrowser.open("https://next.nexusmods.com/profile/ITSM0VER/mods")  # Replace with your URL
+    webbrowser.open("https://next.nexusmods.com/profile/ITSM0VER/mods")  # URL Link
 
 def on_closing():
     save_window_position()  # Save the last window position
     root.destroy()          # Close the app
 
-# Call this immediately after defining get_script_directory()
+# Call this to ensure the files folder exists
 ensure_files_folder()
 
 def open_image_picker_window(parent=None):
     def open_image():
-        nonlocal photo, original_image, img_offset_x, img_offset_y, scale_ratio
+        nonlocal original_image, scale_ratio, img_pos_x, img_pos_y, photo
 
-        # Temporarily turn off topmost so file dialog isn't hidden
         picker_window.attributes("-topmost", False)
         picker_window.update()
 
@@ -364,22 +373,13 @@ def open_image_picker_window(parent=None):
         if file_path:
             original_image = Image.open(file_path)
 
-            # Scale image to fit canvas
-            width, height = original_image.size
-            scale_ratio = min(canvas_width / width, canvas_height / height, 1)  # never upscale
-            new_width = int(width * scale_ratio)
-            new_height = int(height * scale_ratio)
-            resized_image = original_image.resize((new_width, new_height), Image.LANCZOS)
+            # Reset zoom & position
+            scale_ratio = min(canvas_width / original_image.width, canvas_height / original_image.height, 1)
+            new_w, new_h = int(original_image.width * scale_ratio), int(original_image.height * scale_ratio)
+            img_pos_x = (canvas_width - new_w) // 2
+            img_pos_y = (canvas_height - new_h) // 2
+            update_image()
 
-            photo = ImageTk.PhotoImage(resized_image)
-
-            # Center image inside the canvas
-            img_offset_x = (canvas_width - new_width) // 2
-            img_offset_y = (canvas_height - new_height) // 2
-
-            display_image(photo, img_offset_x, img_offset_y)
-
-            # turn on topmost so file dialog isn't hidden
             picker_window.attributes("-topmost", True)
             picker_window.update()
 
@@ -390,10 +390,10 @@ def open_image_picker_window(parent=None):
         canvas.image = img
 
     def get_pixel_color(event):
-        if hasattr(canvas, 'image') and original_image is not None:
-            img_x = event.x - img_offset_x
-            img_y = event.y - img_offset_y
-            if 0 <= img_x < (original_image.width * scale_ratio) and 0 <= img_y < (original_image.height * scale_ratio):
+        if original_image is not None:
+            img_x = event.x - img_pos_x
+            img_y = event.y - img_pos_y
+            if 0 <= img_x < original_image.width * scale_ratio and 0 <= img_y < original_image.height * scale_ratio:
                 orig_x = int(img_x / scale_ratio)
                 orig_y = int(img_y / scale_ratio)
                 pixel_color_rgb = original_image.getpixel((orig_x, orig_y))
@@ -405,31 +405,73 @@ def open_image_picker_window(parent=None):
         hex_value = hex_label.cget("text").split(": ")[1]
         pyperclip.copy(hex_value)
 
-    # New window
+    def update_image(center_x=None, center_y=None):
+        nonlocal photo, img_pos_x, img_pos_y
+        if original_image is None:
+            return
+
+        scale_ratio_clamped = max(0.1, min(scale_ratio, 5.0))
+        new_width = int(original_image.width * scale_ratio_clamped)
+        new_height = int(original_image.height * scale_ratio_clamped)
+        resized_image = original_image.resize((new_width, new_height), Image.LANCZOS)
+        photo = ImageTk.PhotoImage(resized_image)
+
+        # Keep zoom centered on given point or canvas center
+        if center_x is None or center_y is None:
+            center_x, center_y = canvas_width // 2, canvas_height // 2
+        # Current image coords relative to zoom point
+        rel_x = (center_x - img_pos_x) / (original_image.width * scale_ratio)
+        rel_y = (center_y - img_pos_y) / (original_image.height * scale_ratio)
+        # New top-left
+        img_pos_x = int(center_x - rel_x * new_width)
+        img_pos_y = int(center_y - rel_y * new_height)
+
+        display_image(photo, img_pos_x, img_pos_y)
+
+    def zoom(event):
+        nonlocal scale_ratio
+        factor = 1.1 if event.delta > 0 else 0.9
+        scale_ratio *= factor
+        update_image(event.x, event.y)
+
+    def start_pan(event):
+        nonlocal pan_start_x, pan_start_y
+        pan_start_x = event.x
+        pan_start_y = event.y
+
+    def do_pan(event):
+        nonlocal img_pos_x, img_pos_y, pan_start_x, pan_start_y
+        dx = event.x - pan_start_x
+        dy = event.y - pan_start_y
+        img_pos_x += dx
+        img_pos_y += dy
+        pan_start_x = event.x
+        pan_start_y = event.y
+        display_image(photo, img_pos_x, img_pos_y)
+
+    # Create Toplevel
     picker_window = tk.Toplevel(parent)
     picker_window.title("Image Color Picker")
-    picker_window.configure(bg="#2b2b2b")  # dark background
+    picker_window.configure(bg="#2b2b2b")
     picker_window.attributes("-topmost", True)
     window_width, window_height = 650, 700
     picker_window.geometry(f"{window_width}x{window_height}")
     picker_window.resizable(False, False)
-
-    # Set the app icon for this Toplevel window
     picker_window.iconbitmap(os.path.join(get_script_directory(), "Files", ".Resources", "ICON.ico"))
 
-    # Center the window
+    # Center window
     screen_width = picker_window.winfo_screenwidth()
     screen_height = picker_window.winfo_screenheight()
-    position_x = (screen_width - window_width) // 2
-    position_y = (screen_height - window_height) // 2
-    picker_window.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
+    pos_x = (screen_width - window_width) // 2
+    pos_y = (screen_height - window_height) // 2
+    picker_window.geometry(f"{window_width}x{window_height}+{pos_x}+{pos_y}")
 
-    # Fixed canvas size
+    # Canvas
     canvas_width, canvas_height = 600, 500
     canvas = tk.Canvas(picker_window, width=canvas_width, height=canvas_height, bg="#1f1f1f", cursor="pencil")
     canvas.pack(pady=10)
 
-    # Info labels
+    # Labels
     rgb_label = tk.Label(picker_window, text="RGBA: ", font=("Segoe UI", 10), fg="white", bg="#2b2b2b")
     rgb_label.pack(pady=2)
     hex_label = tk.Label(picker_window, text="HEX: ", font=("Segoe UI", 10), fg="white", bg="#2b2b2b")
@@ -445,15 +487,32 @@ def open_image_picker_window(parent=None):
     copy_button = ttk.Button(button_frame, text="Copy Color #", command=copy_color_hex, cursor="hand2")
     copy_button.pack(side=tk.LEFT, padx=5, pady=5)
 
+    #zoom_in_button = ttk.Button(button_frame, text="+", command=lambda: [scale_ratio:=scale_ratio*1.1, update_image()], width=3, cursor="hand2")
+    #zoom_in_button.pack(side=tk.LEFT, padx=5, pady=5)
+
+    #zoom_out_button = ttk.Button(button_frame, text="-", command=lambda: [scale_ratio:=scale_ratio/1.1, update_image()], width=3, cursor="hand2")
+    #zoom_out_button.pack(side=tk.LEFT, padx=5, pady=5)
+
     # Variables
     photo = None
     original_image = None
     scale_ratio = 1.0
-    img_offset_x = 0
-    img_offset_y = 0
+    img_pos_x = 0
+    img_pos_y = 0
+    pan_start_x = 0
+    pan_start_y = 0
 
-    # Bind mouse click
+    # Left-click: pick color
     canvas.bind("<Button-1>", get_pixel_color)
+
+    # Right-click: start panning
+    canvas.bind("<ButtonPress-3>", start_pan)
+    canvas.bind("<B3-Motion>", do_pan)
+
+    # Zoom with mouse wheel
+    canvas.bind("<MouseWheel>", zoom)  # Windows
+    canvas.bind("<Button-4>", lambda e: [scale_ratio:=scale_ratio*1.1, update_image()])  # Linux scroll up
+    canvas.bind("<Button-5>", lambda e: [scale_ratio:=scale_ratio/1.1, update_image()])  # Linux scroll down
 
     picker_window.wait_window()
 
@@ -594,104 +653,6 @@ def update_from_hex(event=None):
             update_color()
         except ValueError:
             pass
-
-def open_color_picker_window(parent=None):
-    global color_display, red_scale, green_scale, blue_scale, color_code, color_picker_window, hex_entry_var
-
-    color_picker_window = tk.Toplevel(parent)
-    color_picker_window.title("Color Codes")
-    window_width = 320
-    window_height = 280
-    color_picker_window.geometry(f"{window_width}x{window_height}")
-    color_picker_window.resizable(False, False)
-    color_picker_window.configure(bg="#2b2b2b")
-    color_picker_window.attributes('-topmost', True)
-
-    # Set the app icon for this Toplevel window
-    color_picker_window.iconbitmap(os.path.join(get_script_directory(), "Files", ".Resources", "ICON.ico"))
-
-    # Center the window on the screen
-    screen_width = color_picker_window.winfo_screenwidth()
-    screen_height = color_picker_window.winfo_screenheight()
-    position_x = (screen_width - window_width) // 2
-    position_y = (screen_height - window_height) // 2
-    color_picker_window.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
-
-    # Color display
-    color_display = tk.Label(
-        color_picker_window,
-        text="Color Display",
-        width=20,
-        height=5,
-        bg="#1f1f1f",
-        fg="white",
-        relief="sunken",
-        bd=2
-        )
-    color_display.grid(row=0, column=0, columnspan=3, pady=10)
-
-    # RGB sliders
-    slider_bg = "#2b2b2b"
-    slider_fg = "#ff5fc0"
-    red_scale = tk.Scale(color_picker_window, from_=0, to=255, orient=tk.HORIZONTAL, label="Red",
-                         command=lambda x: update_color(), bg=slider_bg, fg=slider_fg, highlightbackground=slider_bg)
-    red_scale.grid(row=1, column=0)
-    green_scale = tk.Scale(color_picker_window, from_=0, to=255, orient=tk.HORIZONTAL, label="Green",
-                           command=lambda x: update_color(), bg=slider_bg, fg=slider_fg, highlightbackground=slider_bg)
-    green_scale.grid(row=1, column=1)
-    blue_scale = tk.Scale(color_picker_window, from_=0, to=255, orient=tk.HORIZONTAL, label="Blue",
-                          command=lambda x: update_color(), bg=slider_bg, fg=slider_fg, highlightbackground=slider_bg)
-    blue_scale.grid(row=1, column=2)
-
-    # Current color code display
-    color_code = tk.StringVar()
-    color_code.set("RGB(0, 0, 0) / #000000")
-    color_code_label = tk.Label(
-        color_picker_window,
-        textvariable=color_code,
-        bg="#2b2b2b",
-        fg="white"
-    )
-    color_code_label.grid(row=2, column=0, columnspan=3, pady=5)
-
-    # HEX entry
-    hex_entry_var = tk.StringVar()
-    hex_entry_var.set("")
-    hex_entry = ttk.Entry(color_picker_window, textvariable=hex_entry_var, width=12)
-    hex_entry.grid(row=3, column=0, columnspan=3, pady=5)
-    hex_entry.bind("<Return>", update_from_hex)
-
-    # Buttons frame
-    button_frame = tk.Frame(color_picker_window, bg="#2b2b2b")
-    button_frame.grid(row=4, column=0, columnspan=3, pady=10)
-
-    # Choose color button
-    choose_color_button = tk.Button(
-        color_picker_window,
-        text="Choose Color",
-        command=choose_color,
-        bg="#ff5fc0",
-        fg="white",
-        activebackground="#ff79d1",
-        cursor="hand2"
-    )
-    choose_color_button.grid(row=4, column=0, pady=10, padx=5)
-
-    # Spacer in column 1 (optional)
-    spacer = tk.Label(color_picker_window, width=5, bg="#2b2b2b")
-    spacer.grid(row=4, column=1)
-
-    # Copy color decimal button
-    copy_color_button = tk.Button(
-        color_picker_window,
-        text="Copy Color #",
-        command=copy_color_decimal,
-        bg="#ff5fc0",
-        fg="white",
-        activebackground="#ff79d1",
-        cursor="hand2"
-    )
-    copy_color_button.grid(row=4, column=2, pady=10, padx=5)
 
 def open_color_picker_window(parent=None):
     global color_display, red_scale, green_scale, blue_scale, color_code, color_picker_window, hex_entry_var
@@ -889,11 +850,10 @@ pricedown_font_family = load_pricedown_font(
     os.path.join(get_script_directory(), "Files", ".Resources", "pricedown bl.otf")
 )
 
-# Path to your font file
+# Path to font file
 font_path = os.path.join(get_script_directory(), "Files", ".Resources", "pricedown bl.otf")
 
 # Load font from file with PIL
-from PIL import ImageFont
 font = ImageFont.truetype(font_path, 22)
 
 # Path to the image
@@ -920,36 +880,101 @@ icon_path = os.path.join(get_script_directory(), "Files", ".Resources", "icon.ic
 if os.path.exists(icon_path):
     root.iconbitmap(icon_path)
 
+def show_about():
+    about_win = tk.Toplevel(root)
+    about_win.title("About")
+    about_win.configure(bg="#2b2b2b")
+    about_win.resizable(False, False)
 
-# --- Menu bar setup ---
-menubar = tk.Menu(root)
+    # Center the window
+    win_width = 300
+    win_height = 150
+    x = (root.winfo_screenwidth() // 2) - (win_width // 2)
+    y = (root.winfo_screenheight() // 2) - (win_height // 2)
+    about_win.geometry(f"{win_width}x{win_height}+{x}+{y}")
 
-# File menu
-file_menu = tk.Menu(menubar, tearoff=0)
-file_menu.add_command(label="Create Desktop Shortcut", command=lambda: create_desktop_shortcut())
-file_menu.add_command(label="Exit", command=on_closing)  # You can add more later
-menubar.add_cascade(label="File", menu=file_menu)
+    # Set the app icon for this Toplevel window
+    about_win.iconbitmap(os.path.join(get_script_directory(), "Files", ".Resources", "ICON.ico"))
 
-# Tools menu
-tools_menu = tk.Menu(menubar, tearoff=0)
-tools_menu.add_command(label="Image Color Picker", command=open_image_picker_window)
-tools_menu.add_command(label="RGB Color Codes", command=open_color_picker_window)
-tools_menu.add_command(label="RGB&HEX to float32 Converter", command=open_converter)
-menubar.add_cascade(label="Tools", menu=tools_menu)
-root.config(menu=menubar)
+    # About text
+    tk.Label(
+        about_win,
+        text="Model Fixer v1.2\nby ITSM0VER",
+        bg="#2b2b2b",
+        fg="white",
+        font=("Segoe UI", 12, "bold"),
+        justify="center"
+    ).pack(expand=True)
 
-# Help menu
-help_menu = tk.Menu(menubar, tearoff=0)
-help_menu.add_command(label="Info", command=show_info)
-help_menu.add_separator()
-help_menu.add_command(label="Tutorial Links", command=show_links)
-help_menu.add_separator()
-help_menu.add_command(label="Credits", command=show_credits)
-help_menu.add_command(label=".NET 8.0 Download", command=open_dotnet_download)
-help_menu.add_command(label="About", command=lambda: messagebox.showinfo("About", "Model Fixer v1.0\nby ITSM0VER"))
-menubar.add_cascade(label="Help", menu=help_menu)
+    # OK button
+    tk.Button(
+        about_win,
+        text="OK",
+        command=about_win.destroy,
+        bg="#444444",
+        fg="white",
+        activebackground="#555555",
+        activeforeground="white",
+        relief="flat",
+        width=10
+    ).pack(pady=10)
 
-root.config(menu=menubar)
+# --- Custom dark menu bar ---
+menu_frame = tk.Frame(root, bg="#2b2b2b", height=25)
+menu_frame.pack(side="top", fill="x")
+
+# Helper function to create dark Menubuttons
+def create_dark_menubutton(parent, text, menu_items, font_size=10):
+    btn = tk.Menubutton(
+        parent,
+        text=text,
+        bg="#2b2b2b",
+        fg="white",
+        activebackground="#444444",
+        activeforeground="white",
+        relief="flat",
+        font=("Segoe Script Bold", font_size),
+        cursor="hand2"
+    )
+    menu = tk.Menu(btn, tearoff=0, bg="#2b2b2b", fg="white", activebackground="#444444", activeforeground="white")
+    for item in menu_items:
+        if item == "separator":
+            menu.add_separator()
+        else:
+            label, command = item
+            menu.add_command(label=label, command=command)
+    btn.config(menu=menu)
+    btn.pack(side="left", padx=5)
+    return btn
+
+# File menu items
+file_items = [
+    ("Create Desktop Shortcut", create_desktop_shortcut),
+    ("Exit", on_closing)
+]
+
+# Tools menu items
+tools_items = [
+    ("Image Color Picker", open_image_picker_window),
+    ("RGB Color Codes", open_color_picker_window),
+    ("RGB&HEX to float32 Converter", open_converter)
+]
+
+# Help menu items
+help_items = [
+    ("Info", show_info),
+    "separator",
+    ("Tutorial Links", show_links),
+    "separator",
+    ("Credits", show_credits),
+    (".NET 8.0 Download", open_dotnet_download),
+    ("About", show_about)
+]
+
+# Create the buttons
+file_btn = create_dark_menubutton(menu_frame, "File", file_items)
+tools_btn = create_dark_menubutton(menu_frame, "Tools", tools_items)
+help_btn = create_dark_menubutton(menu_frame, "Help", help_items)
 
 # Restore last position
 last_pos = load_window_position()
@@ -980,7 +1005,7 @@ style.map(
     foreground=[("active", "white")]
 )
 
-# Display your photo at the top
+# Display photo at the top
 img_path = os.path.join(get_script_directory(), "Files", ".Resources", "M0VER.png")
 img = Image.open(img_path)
 img = img.resize((120, 120), Image.Resampling.LANCZOS)
@@ -992,7 +1017,7 @@ img_label.place(relx=0.5, rely=0.25, anchor="center")
 # Make it clickable
 img_label.bind("<Button-1>", lambda e: open_link())
 
-# Place your Fix Model button below the image
+# Place Fix Model button below the image
 def on_enter(e):
     btn_canvas.itemconfig(polygon, fill="#2ecc71")  # brighter green
 
@@ -1000,39 +1025,54 @@ def on_leave(e):
     btn_canvas.itemconfig(polygon, fill="#27ae60")  # normal green
 
 def run_fix_model_clicked():
-    run_fix_model()  # your existing function
+    run_fix_model() #Fix that thang PACHOW xD
 
 # Place button canvas, but no bg color
-btn_canvas = tk.Canvas(root, width=200, height=60, highlightthickness=0, bd=0)
+btn_canvas = tk.Canvas(root, width=230, height=60, highlightthickness=0, bd=0)
 btn_canvas.place(relx=0.5, rely=0.6, anchor="center")
 
-# Set the background image (same bg you used in the app)
-bg_subimage = bg_photo  # reuse the PhotoImage
+# Match canvas size
+btn_width = 820
+btn_height = 600
+
+# Load + resize app background
+bg_path = os.path.join(get_script_directory(), "Files", ".Resources", "bk.png")
+bg_image = Image.open(bg_path).resize((btn_width, btn_height), Image.Resampling.LANCZOS)
+
+# Convert to PhotoImage
+bg_subimage = ImageTk.PhotoImage(bg_image)
+
+# Draw on canvas
 btn_canvas.create_image(0, 0, image=bg_subimage, anchor="nw")
 
-# Initially invisible polygon (transparent)
+# Keep a reference to stop garbage collection
+btn_canvas.bg_ref = bg_subimage
+
+# Amount to shift everything right
+x_offset = 15  # increase to move further right
+
+# Polygon (shifted)
 polygon = btn_canvas.create_polygon(
-    15, 0, 185, 0, 170, 50, 0, 50,  # wider and taller
-    fill="",       # fully transparent
-    outline="",    # no border
-    width=2
+    15 + x_offset, 0, 185 + x_offset, 0, 170 + x_offset, 50, 0 + x_offset, 50,
+    fill="", outline="", width=2
 )
 
-# Shadow text
+# Shadow text (shifted)
 shadow = btn_canvas.create_text(
-    100, 25,
+    100 + x_offset, 25,
     text="Fix Model",
     fill="black",
-    font=("Pricedown bl", 22, "bold")  # use registered font
+    font=("Pricedown bl", 22, "bold")
 )
 
-# Main text
+# Main text (shifted)
 text = btn_canvas.create_text(
-    98, 23,
+    98 + x_offset, 23,
     text="Fix Model",
     fill="#ff5fc0",
     font=("Pricedown bl", 22, "bold")
 )
+
 
 # Hover effect functions
 def on_enter(e):
