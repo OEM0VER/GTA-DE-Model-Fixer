@@ -1,4 +1,4 @@
-![alt text](https://i.imgur.com/IzeMm1h.png)
+![alt text](https://i.imgur.com/LzxZgzh.png)
 
 # Uasset-Model-Fixer
 A lightweight tool for repairing broken Unreal Engine models `.uasset`/`.uexp` for GTA Trilogy DE and packing/unpacking `.pak` files with drag-and-drop simplicity.
