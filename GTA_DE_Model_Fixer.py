@@ -17,6 +17,8 @@ import io
 import shutil
 import threading
 import ctypes
+import json
+import queue
 from ctypes import windll
 import pyperclip
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -28,6 +30,93 @@ def get_script_directory():
     else:
         # The script is run directly
         return os.path.abspath(os.path.dirname(__file__))
+
+def ensure_files_exist():
+    files_folder = os.path.join(get_script_directory(), "Files")
+    unrealpak427_folder = os.path.join(files_folder, "UnrealPak427")
+
+    if not os.path.exists(files_folder) or not os.path.exists(unrealpak427_folder):
+        download_unrealpak427()
+        download_and_extract_v1_3_files ()
+
+def download_unrealpak427():
+    print("[LOG] Downloading UnrealPak427 files…")
+
+    url = "https://drive.google.com/uc?id=1asiecgtQKvtaY9jJuKMd0Y2PalWRAmue"  # new zip only for UnrealPak427
+    zip_path = os.path.join(get_script_directory(), "unrealpak427.zip")
+    files_folder = os.path.join(get_script_directory(), "Files")
+    target_folder = os.path.join(files_folder, "UnrealPak427")
+
+    os.makedirs(files_folder, exist_ok=True)
+
+    # download
+    gdown.download(url, zip_path, quiet=True)
+
+    # extract
+    temp_extract = os.path.join(get_script_directory(), "temp_427")
+    os.makedirs(temp_extract, exist_ok=True)
+
+    with zipfile.ZipFile(zip_path, "r") as zip_ref:
+        zip_ref.extractall(temp_extract)
+
+    # move contents into Files/
+    inner_folder = os.path.join(temp_extract, "UnrealPak427")
+
+    if os.path.exists(inner_folder):
+        shutil.move(inner_folder, target_folder)
+
+    # cleanup
+    shutil.rmtree(temp_extract)
+    os.remove(zip_path)
+
+    print("[LOG] UnrealPak427 installed successfully!")
+
+def download_and_extract_v1_3_files():
+    import os, gdown, zipfile, shutil
+
+    print("[LOG] 'Files/Batches' not found. Downloading…")
+
+    url = "https://drive.google.com/uc?id=1Stcn7DIL5Fgy5cry-Q6bQUlJNGxMmbMc"
+    zip_path = os.path.join(get_script_directory(), "v1.3Files.zip")
+    files_folder = os.path.join(get_script_directory(), "Files")
+    batches_folder = os.path.join(files_folder)
+
+    # Ensure base folder exists
+    os.makedirs(files_folder, exist_ok=True)
+    os.makedirs(batches_folder, exist_ok=True)
+
+    # Download the zip
+    gdown.download(url, zip_path, quiet=True)
+
+    # Extract to temp folder
+    temp_extract = os.path.join(get_script_directory(), "temp_files")
+    os.makedirs(temp_extract, exist_ok=True)
+
+    with zipfile.ZipFile(zip_path, "r") as zip_ref:
+        zip_ref.extractall(temp_extract)
+
+    # TARGET INSIDE ZIP: Files/Batches
+    inner_batches = os.path.join(temp_extract, "Files")
+
+    if os.path.exists(inner_batches):
+        print("[LOG] Installing BAT files...")
+
+        for item in os.listdir(inner_batches):
+            src = os.path.join(inner_batches, item)
+            dst = os.path.join(batches_folder, item)
+
+            if os.path.isdir(src):
+                shutil.move(src, dst)
+            else:
+                shutil.move(src, dst)
+    else:
+        print("[ERROR] Batches folder not found in ZIP structure!")
+
+    # Clean up
+    shutil.rmtree(temp_extract)
+    os.remove(zip_path)
+
+    print("[LOG] Download and extraction complete!")
 
 def download_and_extract_files():
     print("[LOG] 'Files' folder not found. Downloading…")
@@ -143,19 +232,46 @@ def get_screen_resolution():
 
 def setup_drag_and_drop():
     def drop(event, action):
-        dropped_item = os.path.abspath(event.data.strip('{}'))  # normalize path
-        if action == "create_pak":
-            bat_path = os.path.join(get_script_directory(), "Files", "UnrealPak-Without-Compression.bat")
-            if os.path.exists(bat_path):
-                subprocess.Popen([bat_path, dropped_item], shell=True)
-            else:
-                messagebox.showerror("Error", f"{bat_path} not found")
-        elif action == "unpack_pak":
-            bat_path = os.path.join(get_script_directory(), "Files", "UnrealUnpakM0VER.bat")
-            if os.path.exists(bat_path):
-                subprocess.Popen([bat_path, dropped_item], shell=True)
-            else:
-                messagebox.showerror("Error", f"{bat_path} not found")
+        dropped_items = root.tk.splitlist(event.data)
+
+        base_dir = os.path.join(get_script_directory(), "Files")
+
+        if unrealpak_version == "UE4.27":
+            if action == "create_pak":
+                bat_path = os.path.join(
+                    base_dir,
+                    "UnrealPak-Without-Compression.bat"
+                )
+            elif action == "unpack_pak":
+                bat_path = os.path.join(
+                    base_dir,
+                    "UnrealPak427",
+                    "UnrealUnpak427M0VER.bat"
+                )
+        else:
+            if action == "create_pak":
+                bat_path = os.path.join(
+                    base_dir,
+                    "UnrealPak-Without-Compression.bat"
+                )
+            elif action == "unpack_pak":
+                bat_path = os.path.join(
+                    base_dir,
+                    "UnrealUnpakM0VER.bat"
+                )
+
+        if os.path.exists(bat_path):
+
+            for item in dropped_items:
+                dropped_item = os.path.abspath(item)
+
+                subprocess.Popen(
+                    [bat_path, dropped_item],
+                    shell=True
+                )
+
+        else:
+            messagebox.showerror("Error", f"{bat_path} not found")
 
     def create_drop_widget(frame, text, action, width=35, height=3, fg="#fc98de", bg="#198246"):
         screen_width, screen_height = get_screen_resolution()
@@ -305,6 +421,11 @@ def show_info():
         "How to use packaging:\n"
         "- Drag a folder onto the first box to create an uncompressed .PAK.\n"
         "- Drag a .PAK file onto the second box to unpack it.\n\n"
+
+        "Changing UnrealPak version:\n"
+        "- You may need or want to change the version if a pak file doesnt unpack correctly.\n"
+        "- The latest version v4.27 has been added.\n"
+        "- Simply click on File->Change UnrealPak Version at the top.\n\n"        
         "Make sure .NET 8.0 Runtime is installed and files are in the correct folders."
     )
     info_text.config(state="disabled")
@@ -520,6 +641,7 @@ def show_links():
     links = [
         ("Tutorials Index", "https://gtaforums.com/topic/982746-gta-definitive-trilogy-tutorials-index/"),
         ("LC.net Tutorial", "https://libertycity.net/gta-the-trilogy/articles/5194-how-to-create-mods-for-gta-the-trilogy.html"),
+        ("Modding the NSwitch Version ARCHIVED", "https://web.archive.org/web/20211118210532/https://www.reddit.com/r/GTATrilogyMods/comments/qwzkcc/modding_for_the_nintendo_switch_version/"),
         ("Modding the NSwitch Version", "https://www.reddit.com/r/GTATrilogyMods/comments/qwzkcc/modding_for_the_nintendo_switch_version/"),
         ("Texture Modding Guide", "https://gtaforums.com/topic/977439-gtasade-texture-modding-guide/"),
         ("Sound Modding Guide", "https://gtaforums.com/topic/910487-gta-sa-guide-for-making-car-sound-mods/"),
@@ -537,7 +659,7 @@ def show_links():
     links_window.iconbitmap(os.path.join(get_script_directory(), "Files", ".Resources", "ICON.ico"))
 
     # Fixed size & center
-    window_width, window_height = 650, 320
+    window_width, window_height = 700, 320
     screen_width = links_window.winfo_screenwidth()
     screen_height = links_window.winfo_screenheight()
     position_x = (screen_width - window_width) // 2
@@ -831,6 +953,84 @@ def open_converter(parent=None):
                                bg="#ff5fc0", fg="white", activebackground="#ff79d1", cursor="hand2")
     convert_button.pack(pady=10)
 
+CONFIG_FILE = os.path.join(get_script_directory(), "Files", "config.json")
+
+unrealpak_version = "Default"
+
+def load_settings():
+    global unrealpak_version
+
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                data = json.load(f)
+                unrealpak_version = data.get("unrealpak_version", "Default")
+        except:
+            unrealpak_version = "Default"
+
+def save_settings():
+    os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+
+    with open(CONFIG_FILE, "w") as f:
+        json.dump({
+            "unrealpak_version": unrealpak_version
+        }, f)
+
+def Unreal_Pak_Changer():
+    global unrealpak_version
+
+    window = tk.Toplevel(root)
+    window.title("Select UnrealPak Version")
+    window.configure(bg="#2b2b2b")
+    window.resizable(False, False)
+
+    # Center window
+    win_width = 300
+    win_height = 160
+    x = (root.winfo_screenwidth() // 2) - (win_width // 2)
+    y = (root.winfo_screenheight() // 2) - (win_height // 2)
+    window.geometry(f"{win_width}x{win_height}+{x}+{y}")
+
+    # Icon
+    window.iconbitmap(os.path.join(get_script_directory(), "Files", ".Resources", "ICON.ico"))
+
+    # Title label
+    tk.Label(
+        window,
+        text=f"Current Version:\n{unrealpak_version}",
+        bg="#2b2b2b",
+        fg="white",
+        font=("Segoe UI", 11, "bold"),
+        justify="center"
+    ).pack(pady=10)
+
+    # Button style (NOW includes hand cursor)
+    btn_style = {
+        "bg": "#444444",
+        "fg": "white",
+        "activebackground": "#555555",
+        "activeforeground": "white",
+        "relief": "flat",
+        "width": 18,
+        "font": ("Segoe UI", 10),
+        "cursor": "hand2"
+    }
+
+    def set_default():
+        global unrealpak_version
+        unrealpak_version = "Default"
+        save_settings()
+        window.destroy()
+
+    def set_427():
+        global unrealpak_version
+        unrealpak_version = "UE4.27"
+        save_settings()
+        window.destroy()
+
+    tk.Button(window, text="Default UnrealPak", command=set_default, **btn_style).pack(pady=5)
+    tk.Button(window, text="UnrealPak 4.27", command=set_427, **btn_style).pack(pady=5)
+
 # --- UI setup ---
 root = TkinterDnD.Tk() 
 root.title("Model Fixer by ITSM0VER")
@@ -899,7 +1099,7 @@ def show_about():
     # About text
     tk.Label(
         about_win,
-        text="Model Fixer v1.2\nby ITSM0VER",
+        text="Model Fixer v1.3\nby ITSM0VER",
         bg="#2b2b2b",
         fg="white",
         font=("Segoe UI", 12, "bold"),
@@ -949,7 +1149,8 @@ def create_dark_menubutton(parent, text, menu_items, font_size=10):
 
 # File menu items
 file_items = [
-    ("Create Desktop Shortcut", create_desktop_shortcut),
+    ("Create Desktop Shortcut", create_desktop_shortcut),#
+    ("Change UnrealPak Version", Unreal_Pak_Changer),
     ("Exit", on_closing)
 ]
 
@@ -1099,6 +1300,10 @@ watermark = tk.Label(
     bg="#2b2b2b"         # match window background
 )
 watermark.pack(side="bottom", pady=5)
+
+ensure_files_exist()
+
+load_settings()
 
 setup_drag_and_drop()
 
