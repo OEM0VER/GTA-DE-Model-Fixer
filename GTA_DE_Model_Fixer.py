@@ -37,7 +37,7 @@ def ensure_files_exist():
 
     if not os.path.exists(files_folder) or not os.path.exists(unrealpak427_folder):
         download_unrealpak427()
-        download_and_extract_v1_3_files ()
+        download_and_extract_v1_3_files()
 
 def download_unrealpak427():
     print("[LOG] Downloading UnrealPak427 files…")
@@ -236,29 +236,21 @@ def setup_drag_and_drop():
 
         base_dir = os.path.join(get_script_directory(), "Files")
 
-        if unrealpak_version == "UE4.27":
-            if action == "create_pak":
-                bat_path = os.path.join(
-                    base_dir,
-                    "UnrealPak-Without-Compression.bat"
-                )
-            elif action == "unpack_pak":
+        if action == "create_pak":
+            if compression_mode == "Compressed":
+                bat_path = os.path.join(base_dir, "UnrealPak-With-Compression.bat")
+            else:
+                bat_path = os.path.join(base_dir, "UnrealPak-Without-Compression.bat")
+
+        elif action == "unpack_pak":
+            if unrealpak_version == "UE4.27":
                 bat_path = os.path.join(
                     base_dir,
                     "UnrealPak427",
                     "UnrealUnpak427M0VER.bat"
                 )
-        else:
-            if action == "create_pak":
-                bat_path = os.path.join(
-                    base_dir,
-                    "UnrealPak-Without-Compression.bat"
-                )
-            elif action == "unpack_pak":
-                bat_path = os.path.join(
-                    base_dir,
-                    "UnrealUnpakM0VER.bat"
-                )
+            else:
+                bat_path = os.path.join(base_dir, "UnrealUnpakM0VER.bat")
 
         if os.path.exists(bat_path):
 
@@ -291,7 +283,7 @@ def setup_drag_and_drop():
     # Create folder drop frame
     create_frame = tk.Frame(pak_frame, bg="#198246")
     create_frame.pack(side=tk.LEFT, padx=10)
-    create_drop_widget(create_frame, "Drop folder to make uncompressed .PAK", "create_pak")
+    create_drop_widget(create_frame, "Drop folder to make .PAK", "create_pak")
 
     # Create unpack drop frame
     unpack_frame = tk.Frame(pak_frame, bg="#198246")
@@ -476,6 +468,8 @@ def open_link():
 
 def on_closing():
     save_window_position()  # Save the last window position
+    save_unrealpak_settings()
+    save_compression_settings()
     root.destroy()          # Close the app
 
 # Call this to ensure the files folder exists
@@ -953,28 +947,114 @@ def open_converter(parent=None):
                                bg="#ff5fc0", fg="white", activebackground="#ff79d1", cursor="hand2")
     convert_button.pack(pady=10)
 
-CONFIG_FILE = os.path.join(get_script_directory(), "Files", "config.json")
+UNREALPAK_CONFIG_FILE = os.path.join(get_script_directory(), "Files", "config.json")
 
 unrealpak_version = "Default"
 
-def load_settings():
+def load_unrealpak_settings():
     global unrealpak_version
 
-    if os.path.exists(CONFIG_FILE):
+    if os.path.exists(UNREALPAK_CONFIG_FILE):
         try:
-            with open(CONFIG_FILE, "r") as f:
+            with open(UNREALPAK_CONFIG_FILE, "r") as f:
                 data = json.load(f)
                 unrealpak_version = data.get("unrealpak_version", "Default")
         except:
             unrealpak_version = "Default"
 
-def save_settings():
-    os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+def save_unrealpak_settings():
+    os.makedirs(os.path.dirname(UNREALPAK_CONFIG_FILE), exist_ok=True)
 
-    with open(CONFIG_FILE, "w") as f:
+    with open(UNREALPAK_CONFIG_FILE, "w") as f:
         json.dump({
             "unrealpak_version": unrealpak_version
         }, f)
+
+COMPRESSION_CONFIG_FILE = os.path.join(get_script_directory(), "Files", "config2.json")
+
+compression_mode = "No Compression"
+
+def load_compression_settings():
+    global compression_mode
+
+    if os.path.exists(COMPRESSION_CONFIG_FILE):
+        try:
+            with open(COMPRESSION_CONFIG_FILE, "r") as f:
+                data = json.load(f)
+                compression_mode = data.get("compression_mode", "No Compression")
+        except:
+            compression_mode = "No Compression"
+
+def save_compression_settings():
+    os.makedirs(os.path.dirname(COMPRESSION_CONFIG_FILE), exist_ok=True)
+
+    with open(COMPRESSION_CONFIG_FILE, "w") as f:
+        json.dump({
+            "compression_mode": compression_mode
+        }, f)
+
+def get_unrealpak_bat():
+    base_dir = os.path.join(get_script_directory(), "Files")
+
+    if compression_mode == "Compressed":
+        return os.path.join(base_dir, "UnrealPak-With-Compression.bat")
+    else:
+        return os.path.join(base_dir, "UnrealPak-Without-Compression.bat")
+
+def Compression_Changer():
+    global compression_mode
+
+    window = tk.Toplevel(root)
+    window.title("Select Compression Mode")
+    window.configure(bg="#2b2b2b")
+    window.resizable(False, False)
+
+    # Center window
+    win_width = 300
+    win_height = 160
+    x = (root.winfo_screenwidth() // 2) - (win_width // 2)
+    y = (root.winfo_screenheight() // 2) - (win_height // 2)
+    window.geometry(f"{win_width}x{win_height}+{x}+{y}")
+
+    # Icon
+    window.iconbitmap(os.path.join(get_script_directory(), "Files", ".Resources", "ICON.ico"))
+
+    # Title label
+    tk.Label(
+        window,
+        text=f"Current Mode:\n{compression_mode}",
+        bg="#2b2b2b",
+        fg="white",
+        font=("Segoe UI", 11, "bold"),
+        justify="center"
+    ).pack(pady=10)
+
+    # Button style
+    btn_style = {
+        "bg": "#444444",
+        "fg": "white",
+        "activebackground": "#555555",
+        "activeforeground": "white",
+        "relief": "flat",
+        "width": 18,
+        "font": ("Segoe UI", 10),
+        "cursor": "hand2"
+    }
+
+    def set_compressed():
+        global compression_mode
+        compression_mode = "Compressed"
+        save_compression_settings()
+        window.destroy()
+
+    def set_uncompressed():
+        global compression_mode
+        compression_mode = "No Compression"
+        save_compression_settings()
+        window.destroy()
+
+    tk.Button(window, text="Compressed", command=set_compressed, **btn_style).pack(pady=5)
+    tk.Button(window, text="No Compression", command=set_uncompressed, **btn_style).pack(pady=5)
 
 def Unreal_Pak_Changer():
     global unrealpak_version
@@ -1019,13 +1099,13 @@ def Unreal_Pak_Changer():
     def set_default():
         global unrealpak_version
         unrealpak_version = "Default"
-        save_settings()
+        save_unrealpak_settings()
         window.destroy()
 
     def set_427():
         global unrealpak_version
         unrealpak_version = "UE4.27"
-        save_settings()
+        save_unrealpak_settings()
         window.destroy()
 
     tk.Button(window, text="Default UnrealPak", command=set_default, **btn_style).pack(pady=5)
@@ -1149,8 +1229,9 @@ def create_dark_menubutton(parent, text, menu_items, font_size=10):
 
 # File menu items
 file_items = [
-    ("Create Desktop Shortcut", create_desktop_shortcut),#
+    ("Create Desktop Shortcut", create_desktop_shortcut),
     ("Change UnrealPak Version", Unreal_Pak_Changer),
+    ("Change UnrealPak Compression", Compression_Changer),
     ("Exit", on_closing)
 ]
 
@@ -1303,7 +1384,9 @@ watermark.pack(side="bottom", pady=5)
 
 ensure_files_exist()
 
-load_settings()
+load_unrealpak_settings()
+
+load_compression_settings()
 
 setup_drag_and_drop()
 
